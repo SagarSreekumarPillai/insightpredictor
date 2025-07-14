@@ -7,6 +7,11 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import axios from "axios";
 
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
+} from "recharts";
+
+
 export default function CsvUploader() {
   const [file, setFile] = useState<File | null>(null);
   const [columns, setColumns] = useState<string[]>([]);
@@ -79,6 +84,27 @@ export default function CsvUploader() {
               ))}
             </ul>
             <div>🔮 Predictions (sample): {results.predictions?.map((p: number) => p.toFixed(2)).join(", ")}</div>
+         
+            {results.actuals && results.predictions && (
+              <div className="mt-6">
+                <h2 className="text-lg font-semibold mb-2">📉 Predictions vs Actual</h2>
+                <ResponsiveContainer width="100%" height={300}>
+                  <LineChart data={results.predictions.map((pred: number, idx: number) => ({
+                    index: idx + 1,
+                    Prediction: pred,
+                    Actual: results.actuals[idx]
+                  }))}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="index" />
+                    <YAxis />
+                    <Tooltip />
+                    <Legend />
+                    <Line type="monotone" dataKey="Actual" stroke="#8884d8" strokeWidth={2} />
+                    <Line type="monotone" dataKey="Prediction" stroke="#82ca9d" strokeWidth={2} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
