@@ -24,6 +24,7 @@ export default function CsvUploader() {
   const [zThreshold, setZThreshold] = useState(3.0);
   const [anomalies, setAnomalies] = useState<any[] | null>(null);
   const [trendData, setTrendData] = useState<any[] | null>(null);
+  const [summaryData, setSummaryData] = useState<any>({});
 
   const handleUpload = async () => {
     if (!file) return;
@@ -47,6 +48,7 @@ export default function CsvUploader() {
 
     const res = await axios.post("http://localhost:8000/predict", formData);
     setResults(res.data);
+    setSummaryData((prev: any) => ({ ...prev, prediction: res.data }));
   };
 
   const handleCluster = async () => {
@@ -58,6 +60,7 @@ export default function CsvUploader() {
 
     const res = await axios.post("http://localhost:8000/cluster", formData);
     setClusters(res.data.clustered_sample);
+    setSummaryData((prev: any) => ({ ...prev, clusters: res.data.clustered_sample }));
   };
 
   const handleAnomalyDetection = async () => {
@@ -69,6 +72,7 @@ export default function CsvUploader() {
 
     const res = await axios.post("http://localhost:8000/anomalies", formData);
     setAnomalies(res.data.anomalies || []);
+    setSummaryData((prev: any) => ({ ...prev, anomalies: res.data.anomalies || [] }));
   };
 
   const handleTrendDetection = async () => {
@@ -81,6 +85,33 @@ export default function CsvUploader() {
 
     const res = await axios.post("http://localhost:8000/trend", formData);
     setTrendData(res.data.trend || []);
+  };
+
+  const handleExport = async () => {
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("target_column", target || "");
+    formData.append("trend_column", valueColumn || "");
+    formData.append("trend_direction", getTrendDirection());
+    formData.append("summary", JSON.stringify(summaryData));
+
+    try {
+      const res = await axios.post("http://localhost:8000/export", formData, {
+        responseType: "blob",
+      });
+
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", "insight_report.pdf");
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } catch (err) {
+      console.error("Export failed", err);
+    }
   };
 
   const getTrendDirection = () => {
@@ -274,6 +305,14 @@ export default function CsvUploader() {
             </ResponsiveContainer>
           </CardContent>
         </Card>
+      )}
+
+      {(results || anomalies || clusters) && (
+        <div className="mt-6">
+          <Button onClick={handleExport} variant="default">
+            🧾 Export PDF Report
+          </Button>
+        </div>
       )}
     </div>
   );
