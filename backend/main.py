@@ -1,15 +1,17 @@
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 import pandas as pd
 from io import StringIO
 import numpy as np
 from sklearn.linear_model import LinearRegression
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
+import math
 
 app = FastAPI()
 
-# Allow CORS for local frontend
+# CORS for frontend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -18,6 +20,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+def clean_json_safe(obj):
+    if isinstance(obj, float):
+        if math.isinf(obj) or math.isnan(obj):
+            return None
+        return obj
+    elif isinstance(obj, list):
+        return [clean_json_safe(v) for v in obj]
+    elif isinstance(obj, dict):
+        return {k: clean_json_safe(v) for k, v in obj.items()}
+    return obj
+
 @app.get("/")
 def read_root():
     return {"message": "InsightPredictor API is live"}
@@ -25,44 +38,17 @@ def read_root():
 @app.post("/upload")
 async def upload_csv(file: UploadFile = File(...)):
     contents = await file.read()
-
     try:
         decoded = contents.decode("utf-8")
     except UnicodeDecodeError:
-        try:
-            decoded = contents.decode("latin1")  # fallback
-        except Exception as e:
-            return {"error": f"Could not decode file: {str(e)}"}
+        decoded = contents.decode("latin1")
 
     try:
-        df = pd.read_csv(StringIO(decoded), on_bad_lines='skip')
-        
-        # Convert non-JSON-safe values (NaN, inf, -inf) to None
+        df = pd.read_csv(StringIO(decoded), on_bad_lines="skip")
         safe_df = df.head(5).replace([np.inf, -np.inf], np.nan).where(pd.notnull(df.head(5)), None)
-
         return {
             "columns": df.columns.tolist(),
             "rows": safe_df.to_dict(orient="records"),
-            "shape": df.shape
-        }
-    except Exception as e:
-        return {"error": f"Could not parse CSV: {str(e)}"}
-
-    contents = await file.read()
-
-    try:
-        decoded = contents.decode("utf-8")
-    except UnicodeDecodeError:
-        try:
-            decoded = contents.decode("latin1")
-        except Exception as e:
-            return {"error": f"Could not decode file: {str(e)}"}
-
-    try:
-        df = pd.read_csv(StringIO(decoded), on_bad_lines='skip')
-        return {
-            "columns": df.columns.tolist(),
-            "rows": df.head(5).to_dict(orient="records"),
             "shape": df.shape
         }
     except Exception as e:
@@ -87,7 +73,6 @@ async def predict_csv(
         df = df.dropna(subset=[target_column])
         features_df = df.drop(columns=[target_column])
         y = df[target_column]
-
         X = features_df.select_dtypes(include=[np.number])
         if X.empty:
             return {"error": "No numeric features found for training."}
@@ -96,7 +81,7 @@ async def predict_csv(
         model.fit(X, y)
         predictions = model.predict(X)
 
-        return {
+        result = {
             "coefficients": dict(zip(X.columns, model.coef_.tolist())),
             "intercept": float(model.intercept_),
             "predictions": predictions[:5].tolist(),
@@ -105,6 +90,8 @@ async def predict_csv(
             "features_used": X.columns.tolist(),
             "rows_used": len(X)
         }
+
+        return JSONResponse(content=clean_json_safe(result))
 
     except Exception as e:
         return {"error": f"Prediction failed: {str(e)}"}
@@ -130,12 +117,14 @@ async def cluster_csv(
         kmeans.fit(numeric_df)
         df["cluster"] = kmeans.labels_
 
-        return {
+        result = {
             "clustered_sample": df.head(10).to_dict(orient="records"),
             "centroids": kmeans.cluster_centers_.tolist(),
             "features_used": numeric_df.columns.tolist(),
             "num_clusters": n_clusters
         }
+
+        return JSONResponse(content=clean_json_safe(result))
 
     except Exception as e:
         return {"error": f"Clustering failed: {str(e)}"}
@@ -166,12 +155,14 @@ async def detect_anomalies(file: UploadFile = File(...), z_thresh: float = Form(
             cols = numeric_df.columns[(z_scores[i] > z_thresh)]
             reasons.append(", ".join(cols.tolist()))
 
-        return {
+        result = {
             "anomalies": anomalies.head(10).to_dict(orient="records"),
             "reasons": reasons[:10],
             "z_threshold": z_thresh,
             "num_anomalies": int(anomaly_mask.sum())
         }
+
+        return JSONResponse(content=clean_json_safe(result))
 
     except Exception as e:
         return {"error": f"Anomaly detection failed: {str(e)}"}
@@ -200,12 +191,14 @@ async def trend_analysis(
         trend = df.groupby("month")[value_column].mean().reset_index()
         trend_data = trend.to_dict(orient="records")
 
-        return {
+        result = {
             "trend": trend_data,
             "date_column": date_column,
             "value_column": value_column,
             "points": len(trend_data)
         }
+
+        return JSONResponse(content=clean_json_safe(result))
 
     except Exception as e:
         return {"error": f"Trend analysis failed: {str(e)}"}
