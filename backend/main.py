@@ -4,6 +4,7 @@ import pandas as pd
 from io import StringIO
 import numpy as np
 from sklearn.linear_model import LinearRegression
+from sklearn.cluster import KMeans
 
 app = FastAPI()
 
@@ -79,6 +80,7 @@ async def predict_csv(
             "coefficients": dict(zip(X.columns, model.coef_.tolist())),
             "intercept": float(model.intercept_),
             "predictions": predictions[:5].tolist(),  # return first 5 preds
+            "actuals": y[:5].tolist(),  
             "score": float(model.score(X, y)),
             "features_used": X.columns.tolist(),
             "rows_used": len(X)
@@ -86,3 +88,37 @@ async def predict_csv(
 
     except Exception as e:
         return {"error": f"Prediction failed: {str(e)}"}
+
+@app.post("/cluster")
+async def cluster_csv(
+    file: UploadFile = File(...),
+    n_clusters: int = Form(3)
+):
+    contents = await file.read()
+
+    try:
+        decoded = contents.decode("utf-8")
+        df = pd.read_csv(StringIO(decoded), on_bad_lines="skip")
+    except Exception as e:
+        return {"error": f"Could not read CSV: {str(e)}"}
+
+    try:
+        numeric_df = df.select_dtypes(include=[np.number]).dropna()
+
+        if numeric_df.shape[0] < n_clusters:
+            return {"error": f"Not enough rows to form {n_clusters} clusters."}
+
+        kmeans = KMeans(n_clusters=n_clusters, random_state=42)
+        kmeans.fit(numeric_df)
+
+        df["cluster"] = kmeans.labels_
+
+        return {
+            "clustered_sample": df.head(10).to_dict(orient="records"),
+            "centroids": kmeans.cluster_centers_.tolist(),
+            "features_used": numeric_df.columns.tolist(),
+            "num_clusters": n_clusters
+        }
+
+    except Exception as e:
+        return {"error": f"Clustering failed: {str(e)}"}

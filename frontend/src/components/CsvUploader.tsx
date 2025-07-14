@@ -11,7 +11,6 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from "recharts";
 
-
 export default function CsvUploader() {
   const [file, setFile] = useState<File | null>(null);
   const [columns, setColumns] = useState<string[]>([]);
@@ -21,52 +20,93 @@ export default function CsvUploader() {
   const [results, setResults] = useState<any | null>(null);
   const [numClusters, setNumClusters] = useState(3);
   const [clusters, setClusters] = useState<any[] | null>(null);
-
+  const [error, setError] = useState<string | null>(null);
 
   const handleUpload = async () => {
     if (!file) return;
-
     const formData = new FormData();
     formData.append("file", file);
 
-    const res = await axios.post("http://localhost:8000/upload", formData);
-    if (res.data.columns) {
-      setColumns(res.data.columns);
-      setPreview(res.data.rows);
-      setShape(res.data.shape);
+    try {
+      const res = await axios.post("http://localhost:8000/upload", formData);
+      if (res.data.error) {
+        setError(res.data.error);
+      } else {
+        setError(null);
+        setColumns(res.data.columns);
+        setPreview(res.data.rows);
+        setShape(res.data.shape);
+      }
+    } catch (err: any) {
+      setError(err.message || "Upload failed");
     }
   };
 
   const handlePredict = async () => {
     if (!file || !target) return;
-
     const formData = new FormData();
     formData.append("file", file);
     formData.append("target_column", target);
 
-    const res = await axios.post("http://localhost:8000/predict", formData);
-    setResults(res.data);
+    try {
+      const res = await axios.post("http://localhost:8000/predict", formData);
+      if (res.data.error) {
+        setError(res.data.error);
+      } else {
+        setError(null);
+        setResults(res.data);
+      }
+    } catch (err: any) {
+      setError(err.message || "Prediction failed");
+    }
   };
 
   const handleCluster = async () => {
     if (!file) return;
-  
     const formData = new FormData();
     formData.append("file", file);
     formData.append("n_clusters", numClusters.toString());
-  
+
     try {
       const res = await axios.post("http://localhost:8000/cluster", formData);
-      setClusters(res.data.clustered_sample);
-    } catch (err) {
-      console.error("Cluster error", err);
+      if (res.data.error) {
+        setError(res.data.error);
+      } else {
+        setError(null);
+        setClusters(res.data.clustered_sample);
+      }
+    } catch (err: any) {
+      setError(err.message || "Clustering failed");
     }
   };
-  
+
+  const downloadCSV = (data: any[], filename: string) => {
+    const csv =
+      [Object.keys(data[0]).join(","), ...data.map((row) =>
+        Object.values(row).map(String).join(",")
+      )].join("\n");
+
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = window.URL.createObjectURL(blob);
+
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.click();
+
+    window.URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="space-y-6">
       <Input type="file" accept=".csv" onChange={(e) => setFile(e.target.files?.[0] || null)} />
       <Button onClick={handleUpload}>Upload CSV</Button>
+
+      {error && (
+        <div className="bg-red-100 text-red-800 p-3 rounded border border-red-300">
+          ❌ {error}
+        </div>
+      )}
 
       {columns.length > 0 && (
         <>
@@ -99,7 +139,6 @@ export default function CsvUploader() {
             <Button onClick={handleCluster} className="mt-2">Run Clustering</Button>
           </div>
 
-
           <Button onClick={handlePredict} className="mt-2">Predict</Button>
         </>
       )}
@@ -115,7 +154,7 @@ export default function CsvUploader() {
               ))}
             </ul>
             <div>🔮 Predictions (sample): {results.predictions?.map((p: number) => p.toFixed(2)).join(", ")}</div>
-         
+
             {results.actuals && results.predictions && (
               <div className="mt-6">
                 <h2 className="text-lg font-semibold mb-2">📉 Predictions vs Actual</h2>
@@ -136,6 +175,22 @@ export default function CsvUploader() {
                 </ResponsiveContainer>
               </div>
             )}
+
+            <Button
+              variant="secondary"
+              className="mt-4"
+              onClick={() =>
+                downloadCSV(
+                  results.predictions.map((p: number, i: number) => ({
+                    Prediction: p,
+                    Actual: results.actuals?.[i] ?? "",
+                  })),
+                  "predictions.csv"
+                )
+              }
+            >
+              ⬇️ Download Predictions CSV
+            </Button>
           </CardContent>
         </Card>
       )}
@@ -165,7 +220,6 @@ export default function CsvUploader() {
           </CardContent>
         </Card>
       )}
-
     </div>
   );
 }
