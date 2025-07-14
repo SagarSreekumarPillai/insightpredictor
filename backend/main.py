@@ -12,7 +12,7 @@ app = FastAPI()
 # Allow CORS for local frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # You can restrict this later
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -30,7 +30,7 @@ async def upload_csv(file: UploadFile = File(...)):
         decoded = contents.decode("utf-8")
     except UnicodeDecodeError:
         try:
-            decoded = contents.decode("latin1")  # fallback
+            decoded = contents.decode("latin1")
         except Exception as e:
             return {"error": f"Could not decode file: {str(e)}"}
 
@@ -50,7 +50,6 @@ async def predict_csv(
     target_column: str = Form(...)
 ):
     contents = await file.read()
-
     try:
         decoded = contents.decode("utf-8")
         df = pd.read_csv(StringIO(decoded), on_bad_lines="skip")
@@ -61,27 +60,23 @@ async def predict_csv(
         return {"error": f"Target column '{target_column}' not found in CSV."}
 
     try:
-        # Drop rows with nulls in target or features
         df = df.dropna(subset=[target_column])
         features_df = df.drop(columns=[target_column])
         y = df[target_column]
 
-        # Use only numeric columns for prediction
         X = features_df.select_dtypes(include=[np.number])
-
         if X.empty:
             return {"error": "No numeric features found for training."}
 
         model = LinearRegression()
         model.fit(X, y)
-
         predictions = model.predict(X)
 
         return {
             "coefficients": dict(zip(X.columns, model.coef_.tolist())),
             "intercept": float(model.intercept_),
-            "predictions": predictions[:5].tolist(),  # return first 5 preds
-            "actuals": y[:5].tolist(),  
+            "predictions": predictions[:5].tolist(),
+            "actuals": y[:5].tolist(),
             "score": float(model.score(X, y)),
             "features_used": X.columns.tolist(),
             "rows_used": len(X)
@@ -96,7 +91,6 @@ async def cluster_csv(
     n_clusters: int = Form(3)
 ):
     contents = await file.read()
-
     try:
         decoded = contents.decode("utf-8")
         df = pd.read_csv(StringIO(decoded), on_bad_lines="skip")
@@ -105,13 +99,11 @@ async def cluster_csv(
 
     try:
         numeric_df = df.select_dtypes(include=[np.number]).dropna()
-
         if numeric_df.shape[0] < n_clusters:
             return {"error": f"Not enough rows to form {n_clusters} clusters."}
 
         kmeans = KMeans(n_clusters=n_clusters, random_state=42)
         kmeans.fit(numeric_df)
-
         df["cluster"] = kmeans.labels_
 
         return {
@@ -127,7 +119,6 @@ async def cluster_csv(
 @app.post("/anomalies")
 async def detect_anomalies(file: UploadFile = File(...), z_thresh: float = Form(3.0)):
     contents = await file.read()
-
     try:
         decoded = contents.decode("utf-8")
         df = pd.read_csv(StringIO(decoded), on_bad_lines="skip")
@@ -142,8 +133,8 @@ async def detect_anomalies(file: UploadFile = File(...), z_thresh: float = Form(
         scaler = StandardScaler()
         scaled = scaler.fit_transform(numeric_df)
         z_scores = np.abs(scaled)
-
         anomaly_mask = (z_scores > z_thresh).any(axis=1)
+
         anomalies = df[anomaly_mask].copy()
         reasons = []
 
@@ -160,3 +151,37 @@ async def detect_anomalies(file: UploadFile = File(...), z_thresh: float = Form(
 
     except Exception as e:
         return {"error": f"Anomaly detection failed: {str(e)}"}
+
+@app.post("/trend")
+async def trend_analysis(
+    file: UploadFile = File(...),
+    date_column: str = Form(...),
+    value_column: str = Form(...)
+):
+    contents = await file.read()
+    try:
+        decoded = contents.decode("utf-8")
+        df = pd.read_csv(StringIO(decoded), on_bad_lines="skip")
+    except Exception as e:
+        return {"error": f"Could not read CSV: {str(e)}"}
+
+    if date_column not in df.columns or value_column not in df.columns:
+        return {"error": "Date or value column not found."}
+
+    try:
+        df[date_column] = pd.to_datetime(df[date_column], errors='coerce')
+        df = df.dropna(subset=[date_column, value_column])
+        df["month"] = df[date_column].dt.to_period("M").astype(str)
+
+        trend = df.groupby("month")[value_column].mean().reset_index()
+        trend_data = trend.to_dict(orient="records")
+
+        return {
+            "trend": trend_data,
+            "date_column": date_column,
+            "value_column": value_column,
+            "points": len(trend_data)
+        }
+
+    except Exception as e:
+        return {"error": f"Trend analysis failed: {str(e)}"}
