@@ -5,6 +5,7 @@ from io import StringIO
 import numpy as np
 from sklearn.linear_model import LinearRegression
 from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
 
 app = FastAPI()
 
@@ -122,3 +123,40 @@ async def cluster_csv(
 
     except Exception as e:
         return {"error": f"Clustering failed: {str(e)}"}
+
+@app.post("/anomalies")
+async def detect_anomalies(file: UploadFile = File(...), z_thresh: float = Form(3.0)):
+    contents = await file.read()
+
+    try:
+        decoded = contents.decode("utf-8")
+        df = pd.read_csv(StringIO(decoded), on_bad_lines="skip")
+    except Exception as e:
+        return {"error": f"Could not read CSV: {str(e)}"}
+
+    try:
+        numeric_df = df.select_dtypes(include=[np.number])
+        if numeric_df.empty:
+            return {"error": "No numeric columns found."}
+
+        scaler = StandardScaler()
+        scaled = scaler.fit_transform(numeric_df)
+        z_scores = np.abs(scaled)
+
+        anomaly_mask = (z_scores > z_thresh).any(axis=1)
+        anomalies = df[anomaly_mask].copy()
+        reasons = []
+
+        for i, row in anomalies.iterrows():
+            cols = numeric_df.columns[(z_scores[i] > z_thresh)]
+            reasons.append(", ".join(cols.tolist()))
+
+        return {
+            "anomalies": anomalies.head(10).to_dict(orient="records"),
+            "reasons": reasons[:10],
+            "z_threshold": z_thresh,
+            "num_anomalies": int(anomaly_mask.sum())
+        }
+
+    except Exception as e:
+        return {"error": f"Anomaly detection failed: {str(e)}"}

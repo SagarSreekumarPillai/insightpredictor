@@ -20,93 +20,68 @@ export default function CsvUploader() {
   const [results, setResults] = useState<any | null>(null);
   const [numClusters, setNumClusters] = useState(3);
   const [clusters, setClusters] = useState<any[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [zThreshold, setZThreshold] = useState(3.0);
+  const [anomalies, setAnomalies] = useState<any[] | null>(null);
 
   const handleUpload = async () => {
     if (!file) return;
+
     const formData = new FormData();
     formData.append("file", file);
 
-    try {
-      const res = await axios.post("http://localhost:8000/upload", formData);
-      if (res.data.error) {
-        setError(res.data.error);
-      } else {
-        setError(null);
-        setColumns(res.data.columns);
-        setPreview(res.data.rows);
-        setShape(res.data.shape);
-      }
-    } catch (err: any) {
-      setError(err.message || "Upload failed");
+    const res = await axios.post("http://localhost:8000/upload", formData);
+    if (res.data.columns) {
+      setColumns(res.data.columns);
+      setPreview(res.data.rows);
+      setShape(res.data.shape);
     }
   };
 
   const handlePredict = async () => {
     if (!file || !target) return;
+
     const formData = new FormData();
     formData.append("file", file);
     formData.append("target_column", target);
 
-    try {
-      const res = await axios.post("http://localhost:8000/predict", formData);
-      if (res.data.error) {
-        setError(res.data.error);
-      } else {
-        setError(null);
-        setResults(res.data);
-      }
-    } catch (err: any) {
-      setError(err.message || "Prediction failed");
-    }
+    const res = await axios.post("http://localhost:8000/predict", formData);
+    setResults(res.data);
   };
 
   const handleCluster = async () => {
     if (!file) return;
+
     const formData = new FormData();
     formData.append("file", file);
     formData.append("n_clusters", numClusters.toString());
 
     try {
       const res = await axios.post("http://localhost:8000/cluster", formData);
-      if (res.data.error) {
-        setError(res.data.error);
-      } else {
-        setError(null);
-        setClusters(res.data.clustered_sample);
-      }
-    } catch (err: any) {
-      setError(err.message || "Clustering failed");
+      setClusters(res.data.clustered_sample);
+    } catch (err) {
+      console.error("Cluster error", err);
     }
   };
 
-  const downloadCSV = (data: any[], filename: string) => {
-    const csv =
-      [Object.keys(data[0]).join(","), ...data.map((row) =>
-        Object.values(row).map(String).join(",")
-      )].join("\n");
+  const handleAnomalyDetection = async () => {
+    if (!file) return;
 
-    const blob = new Blob([csv], { type: "text/csv" });
-    const url = window.URL.createObjectURL(blob);
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("z_thresh", zThreshold.toString());
 
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = filename;
-    link.click();
-
-    window.URL.revokeObjectURL(url);
+    try {
+      const res = await axios.post("http://localhost:8000/anomalies", formData);
+      setAnomalies(res.data.anomalies || []);
+    } catch (err) {
+      console.error("Anomaly detection error", err);
+    }
   };
 
   return (
     <div className="space-y-6">
       <Input type="file" accept=".csv" onChange={(e) => setFile(e.target.files?.[0] || null)} />
       <Button onClick={handleUpload}>Upload CSV</Button>
-
-      {error && (
-        <div className="bg-red-100 text-red-800 p-3 rounded border border-red-300">
-          ❌ {error}
-        </div>
-      )}
 
       {columns.length > 0 && (
         <>
@@ -127,7 +102,7 @@ export default function CsvUploader() {
             ))}
           </select>
 
-          <div className="mt-6 space-y-2">
+          <div className="mt-4 space-y-2">
             <Label htmlFor="clusters">🧬 Number of Clusters</Label>
             <Input
               type="number"
@@ -136,7 +111,19 @@ export default function CsvUploader() {
               value={numClusters}
               onChange={(e) => setNumClusters(parseInt(e.target.value))}
             />
-            <Button onClick={handleCluster} className="mt-2">Run Clustering</Button>
+            <Button onClick={handleCluster}>Run Clustering</Button>
+          </div>
+
+          <div className="mt-4 space-y-2">
+            <Label htmlFor="z">🚨 Anomaly Z-Threshold</Label>
+            <Input
+              type="number"
+              step={0.1}
+              min={0.5}
+              value={zThreshold}
+              onChange={(e) => setZThreshold(parseFloat(e.target.value))}
+            />
+            <Button onClick={handleAnomalyDetection}>Detect Anomalies</Button>
           </div>
 
           <Button onClick={handlePredict} className="mt-2">Predict</Button>
@@ -175,22 +162,6 @@ export default function CsvUploader() {
                 </ResponsiveContainer>
               </div>
             )}
-
-            <Button
-              variant="secondary"
-              className="mt-4"
-              onClick={() =>
-                downloadCSV(
-                  results.predictions.map((p: number, i: number) => ({
-                    Prediction: p,
-                    Actual: results.actuals?.[i] ?? "",
-                  })),
-                  "predictions.csv"
-                )
-              }
-            >
-              ⬇️ Download Predictions CSV
-            </Button>
           </CardContent>
         </Card>
       )}
@@ -209,6 +180,32 @@ export default function CsvUploader() {
               </thead>
               <tbody>
                 {clusters.map((row, i) => (
+                  <tr key={i}>
+                    {Object.values(row).map((val, j) => (
+                      <td key={j} className="pr-4">{String(val)}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+      )}
+
+      {anomalies && anomalies.length > 0 && (
+        <Card className="mt-6">
+          <CardContent className="space-y-2 p-4">
+            <div className="font-medium text-red-600">🚨 Detected Anomalies:</div>
+            <table className="text-sm w-full">
+              <thead>
+                <tr>
+                  {Object.keys(anomalies[0]).map((key) => (
+                    <th key={key} className="text-left pr-4">{key}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {anomalies.map((row, i) => (
                   <tr key={i}>
                     {Object.values(row).map((val, j) => (
                       <td key={j} className="pr-4">{String(val)}</td>
