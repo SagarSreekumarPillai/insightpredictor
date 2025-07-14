@@ -30,6 +30,30 @@ async def upload_csv(file: UploadFile = File(...)):
         decoded = contents.decode("utf-8")
     except UnicodeDecodeError:
         try:
+            decoded = contents.decode("latin1")  # fallback
+        except Exception as e:
+            return {"error": f"Could not decode file: {str(e)}"}
+
+    try:
+        df = pd.read_csv(StringIO(decoded), on_bad_lines='skip')
+        
+        # Convert non-JSON-safe values (NaN, inf, -inf) to None
+        safe_df = df.head(5).replace([np.inf, -np.inf], np.nan).where(pd.notnull(df.head(5)), None)
+
+        return {
+            "columns": df.columns.tolist(),
+            "rows": safe_df.to_dict(orient="records"),
+            "shape": df.shape
+        }
+    except Exception as e:
+        return {"error": f"Could not parse CSV: {str(e)}"}
+
+    contents = await file.read()
+
+    try:
+        decoded = contents.decode("utf-8")
+    except UnicodeDecodeError:
+        try:
             decoded = contents.decode("latin1")
         except Exception as e:
             return {"error": f"Could not decode file: {str(e)}"}
