@@ -8,6 +8,12 @@ from sklearn.linear_model import LinearRegression
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
 import math
+from fastapi.responses import FileResponse
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
+import tempfile
+import os
+import json
 
 app = FastAPI()
 
@@ -202,3 +208,81 @@ async def trend_analysis(
 
     except Exception as e:
         return {"error": f"Trend analysis failed: {str(e)}"}
+
+@app.post("/export")
+async def export_pdf(
+    file: UploadFile = File(...),
+    target_column: str = Form(""),
+    trend_column: str = Form(""),
+    trend_direction: str = Form(""),
+    summary: str = Form("")  # JSON string with prediction, anomalies, etc.
+):
+    try:
+        # Parse the JSON summary
+        summary_data = json.loads(summary)
+
+        # Create a temp file for the PDF
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+        c = canvas.Canvas(tmp.name, pagesize=A4)
+        width, height = A4
+        line_height = 20
+        y = height - 40
+
+        # Title
+        c.setFont("Helvetica-Bold", 16)
+        c.drawString(50, y, "📊 InsightPredictor Analysis Report")
+        y -= 40
+
+        c.setFont("Helvetica", 12)
+
+        if target_column:
+            c.drawString(50, y, f"🎯 Prediction Target: {target_column}")
+            y -= line_height
+
+        if trend_column:
+            c.drawString(50, y, f"📈 Trend Column: {trend_column} → {trend_direction}")
+            y -= line_height
+
+        # Add Prediction Results
+        pred = summary_data.get("prediction", {})
+        if pred:
+            c.drawString(50, y, f"✅ R² Score: {round(pred.get('score', 0), 3)}")
+            y -= line_height
+            c.drawString(50, y, "📉 Coefficients:")
+            y -= line_height
+            for k, v in pred.get("coefficients", {}).items():
+                c.drawString(70, y, f"{k}: {round(v, 3)}")
+                y -= line_height
+
+        # Anomalies
+        anomalies = summary_data.get("anomalies", [])
+        if anomalies:
+            y -= line_height
+            c.drawString(50, y, "🚨 Anomalies Detected:")
+            y -= line_height
+            for row in anomalies[:5]:
+                c.drawString(70, y, str(row))
+                y -= line_height
+                if y < 100:
+                    c.showPage()
+                    y = height - 40
+
+        # Clustering
+        clusters = summary_data.get("clusters", [])
+        if clusters:
+            y -= line_height
+            c.drawString(50, y, "🧬 Clustering Sample:")
+            y -= line_height
+            for row in clusters[:5]:
+                c.drawString(70, y, str(row))
+                y -= line_height
+                if y < 100:
+                    c.showPage()
+                    y = height - 40
+
+        c.save()
+
+        return FileResponse(tmp.name, filename="insight_report.pdf", media_type="application/pdf")
+
+    except Exception as e:
+        return {"error": f"PDF export failed: {str(e)}"}
