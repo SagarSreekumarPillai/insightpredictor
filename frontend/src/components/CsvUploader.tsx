@@ -19,6 +19,9 @@ export default function CsvUploader() {
   const [shape, setShape] = useState<number[] | null>(null);
   const [target, setTarget] = useState<string>("");
   const [results, setResults] = useState<any | null>(null);
+  const [numClusters, setNumClusters] = useState(3);
+  const [clusters, setClusters] = useState<any[] | null>(null);
+
 
   const handleUpload = async () => {
     if (!file) return;
@@ -45,6 +48,21 @@ export default function CsvUploader() {
     setResults(res.data);
   };
 
+  const handleCluster = async () => {
+    if (!file) return;
+  
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("n_clusters", numClusters.toString());
+  
+    try {
+      const res = await axios.post("http://localhost:8000/cluster", formData);
+      setClusters(res.data.clustered_sample);
+    } catch (err) {
+      console.error("Cluster error", err);
+    }
+  };
+  
   return (
     <div className="space-y-6">
       <Input type="file" accept=".csv" onChange={(e) => setFile(e.target.files?.[0] || null)} />
@@ -68,6 +86,19 @@ export default function CsvUploader() {
               <option key={col} value={col}>{col}</option>
             ))}
           </select>
+
+          <div className="mt-6 space-y-2">
+            <Label htmlFor="clusters">🧬 Number of Clusters</Label>
+            <Input
+              type="number"
+              min={2}
+              max={10}
+              value={numClusters}
+              onChange={(e) => setNumClusters(parseInt(e.target.value))}
+            />
+            <Button onClick={handleCluster} className="mt-2">Run Clustering</Button>
+          </div>
+
 
           <Button onClick={handlePredict} className="mt-2">Predict</Button>
         </>
@@ -108,6 +139,33 @@ export default function CsvUploader() {
           </CardContent>
         </Card>
       )}
+
+      {clusters && (
+        <Card className="mt-6">
+          <CardContent className="space-y-2 p-4">
+            <div className="font-medium">🧬 Clustered Sample:</div>
+            <table className="text-sm w-full">
+              <thead>
+                <tr>
+                  {Object.keys(clusters[0]).map((key) => (
+                    <th key={key} className="text-left pr-4">{key}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {clusters.map((row, i) => (
+                  <tr key={i}>
+                    {Object.values(row).map((val, j) => (
+                      <td key={j} className="pr-4">{String(val)}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+      )}
+
     </div>
   );
 }
