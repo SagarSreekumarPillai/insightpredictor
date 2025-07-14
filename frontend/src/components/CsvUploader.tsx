@@ -1,15 +1,25 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import axios from "axios";
-
+import toast, { Toaster } from "react-hot-toast";
 import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+  AreaChart,
+  Area,
 } from "recharts";
+import { ArrowDownCircle, Moon, Sun, FileDown } from "lucide-react";
+import { motion } from "framer-motion";
 
 export default function CsvUploader() {
   const [file, setFile] = useState<File | null>(null);
@@ -24,296 +34,231 @@ export default function CsvUploader() {
   const [zThreshold, setZThreshold] = useState(3.0);
   const [anomalies, setAnomalies] = useState<any[] | null>(null);
   const [trendData, setTrendData] = useState<any[] | null>(null);
-  const [summaryData, setSummaryData] = useState<any>({});
+  const [darkMode, setDarkMode] = useState(true);
+
+  const resultRef = useRef<HTMLDivElement>(null);
+  const scrollToResults = () => {
+    if (resultRef.current) {
+      resultRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  };
+
+  const themeClasses = darkMode ? "bg-gray-950 text-gray-100" : "bg-white text-gray-900";
+  const cardClasses = darkMode ? "bg-gray-900 border-gray-800" : "bg-white border-gray-200";
+  const selectClasses = darkMode ? "bg-gray-800 text-white" : "bg-white text-black";
+  const headingClasses = darkMode ? "text-lg font-semibold text-white" : "text-lg font-semibold text-black";
+  const buttonClasses = darkMode ? "bg-orange-600 text-white hover:bg-orange-500" : "bg-orange-500 text-white hover:bg-orange-400";
+
+  const toggleTheme = () => setDarkMode((prev) => !prev);
 
   const handleUpload = async () => {
-    if (!file) return;
-
+    if (!file) return toast.error("Please upload a file first");
     const formData = new FormData();
     formData.append("file", file);
-
-    const res = await axios.post("http://localhost:8000/upload", formData);
-    if (res.data.columns) {
-      setColumns(res.data.columns);
-      setShape(res.data.shape);
+    try {
+      const res = await axios.post("http://localhost:8000/upload", formData);
+      if (res.data.columns) {
+        setColumns(res.data.columns);
+        setShape(res.data.shape);
+        toast.success("CSV uploaded successfully!");
+      }
+    } catch {
+      toast.error("Failed to upload CSV");
     }
   };
 
   const handlePredict = async () => {
-    if (!file || !target) return;
-
+    if (!file || !target) return toast.error("Please select a target column");
     const formData = new FormData();
     formData.append("file", file);
     formData.append("target_column", target);
-
-    const res = await axios.post("http://localhost:8000/predict", formData);
-    setResults(res.data);
-    setSummaryData((prev: any) => ({ ...prev, prediction: res.data }));
-  };
-
-  const handleCluster = async () => {
-    if (!file) return;
-
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("n_clusters", numClusters.toString());
-
-    const res = await axios.post("http://localhost:8000/cluster", formData);
-    setClusters(res.data.clustered_sample);
-    setSummaryData((prev: any) => ({ ...prev, clusters: res.data.clustered_sample }));
-  };
-
-  const handleAnomalyDetection = async () => {
-    if (!file) return;
-
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("z_thresh", zThreshold.toString());
-
-    const res = await axios.post("http://localhost:8000/anomalies", formData);
-    setAnomalies(res.data.anomalies || []);
-    setSummaryData((prev: any) => ({ ...prev, anomalies: res.data.anomalies || [] }));
+    try {
+      const res = await axios.post("http://localhost:8000/predict", formData);
+      setResults(res.data);
+      toast.success("Prediction complete!");
+    } catch {
+      toast.error("Prediction failed");
+    }
   };
 
   const handleTrendDetection = async () => {
-    if (!file || !dateColumn || !valueColumn) return;
-
+    if (!file || !dateColumn || !valueColumn) return toast.error("Select date/value columns");
     const formData = new FormData();
     formData.append("file", file);
     formData.append("date_column", dateColumn);
     formData.append("value_column", valueColumn);
+    try {
+      const res = await axios.post("http://localhost:8000/trend", formData);
+      setTrendData(res.data.trend);
+      toast.success("Trend analysis complete");
+    } catch {
+      toast.error("Trend analysis failed");
+    }
+  };
 
-    const res = await axios.post("http://localhost:8000/trend", formData);
-    setTrendData(res.data.trend || []);
+  const handleAnomalyDetection = async () => {
+    if (!file) return toast.error("Upload a CSV first");
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("z_thresh", zThreshold.toString());
+    try {
+      const res = await axios.post("http://localhost:8000/anomalies", formData);
+      setAnomalies(res.data.anomalies);
+      toast.success("Anomaly detection complete");
+    } catch {
+      toast.error("Anomaly detection failed");
+    }
+  };
+
+  const handleCluster = async () => {
+    if (!file) return toast.error("Upload a CSV first");
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("n_clusters", numClusters.toString());
+    try {
+      const res = await axios.post("http://localhost:8000/cluster", formData);
+      setClusters(res.data.clustered_sample);
+      toast.success("Clustering complete");
+    } catch {
+      toast.error("Clustering failed");
+    }
   };
 
   const handleExport = async () => {
-    if (!file) return;
-
+    if (!file) return toast.error("Upload a CSV first");
     const formData = new FormData();
     formData.append("file", file);
-    formData.append("target_column", target || "");
-    formData.append("trend_column", valueColumn || "");
-    formData.append("trend_direction", getTrendDirection());
-    formData.append("summary", JSON.stringify(summaryData));
-
+    formData.append("target_column", target);
+    formData.append("trend_column", valueColumn);
+    formData.append("trend_direction", (trendData?.[0]?.[valueColumn] < trendData?.at(-1)?.[valueColumn] ? "Increasing" : "Decreasing"));
+    formData.append("summary", JSON.stringify({ prediction: results, anomalies, clusters }));
     try {
-      const res = await axios.post("http://localhost:8000/export", formData, {
-        responseType: "blob",
-      });
-
+      const res = await axios.post("http://localhost:8000/export", formData, { responseType: "blob" });
       const url = window.URL.createObjectURL(new Blob([res.data]));
       const link = document.createElement("a");
       link.href = url;
       link.setAttribute("download", "insight_report.pdf");
       document.body.appendChild(link);
       link.click();
-      link.remove();
-    } catch (err) {
-      console.error("Export failed", err);
+      toast.success("PDF exported");
+    } catch {
+      toast.error("PDF export failed");
     }
   };
 
-  const getTrendDirection = () => {
-    if (!trendData || trendData.length < 2) return "⏸ Flat";
-    const first = trendData[0][valueColumn];
-    const last = trendData[trendData.length - 1][valueColumn];
-    return last > first ? "📈 Increasing" : last < first ? "📉 Decreasing" : "⏸ Flat";
-  };
-
   return (
-    <div className="space-y-6">
-      <Input type="file" accept=".csv" onChange={(e) => setFile(e.target.files?.[0] || null)} />
-      <Button onClick={handleUpload}>Upload CSV</Button>
+    <div className={`min-h-screen px-6 py-10 space-y-10 transition-colors duration-300 ${themeClasses}`}>
+      <Toaster />
+      <div className="fixed top-6 right-6 z-50 flex gap-3">
+        <button onClick={toggleTheme} className={`p-2 rounded-full shadow-md ${buttonClasses}`}>
+          {darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+        </button>
+        <button className={`p-3 rounded-full shadow-lg ${buttonClasses}`} onClick={scrollToResults}>
+          <ArrowDownCircle className="w-6 h-6" />
+        </button>
+      </div>
 
-      {columns.length > 0 && (
-        <>
-          <div className="text-sm text-muted-foreground">
-            🔢 Shape: {shape?.[0]} rows × {shape?.[1]} columns
-          </div>
-          <div className="text-sm font-medium">🧩 Columns: {columns.join(", ")}</div>
-
-          <Label className="mt-4 block">🎯 Target Column (for prediction)</Label>
-          <select
-            className="border p-2 rounded w-full"
-            value={target}
-            onChange={(e) => setTarget(e.target.value)}
-          >
-            <option value="">-- Select --</option>
-            {columns.map((col) => (
-              <option key={col} value={col}>{col}</option>
-            ))}
-          </select>
-
-          <div className="mt-4 space-y-2">
-            <Label>🧬 Number of Clusters</Label>
-            <Input
-              type="number"
-              min={2}
-              max={10}
-              value={numClusters}
-              onChange={(e) => setNumClusters(parseInt(e.target.value))}
-            />
-            <Button onClick={handleCluster}>Run Clustering</Button>
-          </div>
-
-          <div className="mt-4 space-y-2">
-            <Label>🚨 Anomaly Z-Threshold</Label>
-            <Input
-              type="number"
-              step={0.1}
-              min={0.5}
-              value={zThreshold}
-              onChange={(e) => setZThreshold(parseFloat(e.target.value))}
-            />
-            <Button onClick={handleAnomalyDetection}>Detect Anomalies</Button>
-          </div>
-
-          <div className="mt-4 space-y-2">
-            <Label>📅 Date Column (for trend)</Label>
-            <select
-              className="border p-2 rounded w-full"
-              value={dateColumn}
-              onChange={(e) => setDateColumn(e.target.value)}
-            >
+      <div className="space-y-4">
+        <Input type="file" accept=".csv" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+        <Button onClick={handleUpload} className={buttonClasses}>Upload CSV</Button>
+        {columns.length > 0 && (
+          <>
+            <div className="text-sm">🔢 Shape: {shape?.[0]} rows × {shape?.[1]} columns</div>
+            <Label className="block">🎯 Target Column</Label>
+            <select className={`p-2 rounded w-full ${selectClasses}`} value={target} onChange={(e) => setTarget(e.target.value)}>
               <option value="">-- Select --</option>
-              {columns.map((col) => (
-                <option key={col} value={col}>{col}</option>
-              ))}
+              {columns.map((col) => <option key={col} value={col}>{col}</option>)}
             </select>
+            <Button onClick={handlePredict} className={buttonClasses}>Predict</Button>
 
-            <Label className="mt-2">📊 Value Column (for trend)</Label>
-            <select
-              className="border p-2 rounded w-full"
-              value={valueColumn}
-              onChange={(e) => setValueColumn(e.target.value)}
-            >
+            <Label className="block mt-4">📅 Date Column</Label>
+            <select className={`p-2 rounded w-full ${selectClasses}`} value={dateColumn} onChange={(e) => setDateColumn(e.target.value)}>
               <option value="">-- Select --</option>
-              {columns.map((col) => (
-                <option key={col} value={col}>{col}</option>
-              ))}
+              {columns.map((col) => <option key={col} value={col}>{col}</option>)}
             </select>
+            <Label className="block mt-2">📊 Value Column</Label>
+            <select className={`p-2 rounded w-full ${selectClasses}`} value={valueColumn} onChange={(e) => setValueColumn(e.target.value)}>
+              <option value="">-- Select --</option>
+              {columns.map((col) => <option key={col} value={col}>{col}</option>)}
+            </select>
+            <Button onClick={handleTrendDetection} className={buttonClasses}>Detect Trend</Button>
 
-            <Button onClick={handleTrendDetection}>Detect Trend</Button>
-          </div>
+            <Label className="block mt-4">🚨 Anomaly Z-Threshold</Label>
+            <Input type="number" step={0.1} value={zThreshold} onChange={(e) => setZThreshold(parseFloat(e.target.value))} />
+            <Button onClick={handleAnomalyDetection} className={buttonClasses}>Detect Anomalies</Button>
 
-          <Button onClick={handlePredict} className="mt-2">Predict</Button>
-        </>
-      )}
+            <Label className="block mt-4">🧬 Number of Clusters</Label>
+            <Input type="number" value={numClusters} onChange={(e) => setNumClusters(parseInt(e.target.value))} />
+            <Button onClick={handleCluster} className={buttonClasses}>Run Clustering</Button>
 
-      {results && (
-        <Card className="mt-6">
-          <CardContent className="space-y-2 p-4">
-            <div>✅ R² Score: <b>{results.score?.toFixed(3)}</b></div>
-            <div>📈 Coefficients:</div>
-            <ul className="list-disc list-inside text-sm">
-              {Object.entries(results.coefficients || {}).map(([k, v]) => (
-                <li key={k}>{k}: {Number(v).toFixed(3)}</li>
-              ))}
-            </ul>
-            <div>🔮 Predictions (sample): {results.predictions?.map((p: number) => p.toFixed(2)).join(", ")}</div>
+            <Button onClick={handleExport} className={buttonClasses}>📄 Export as PDF</Button>
+          </>
+        )}
+      </div>
 
-            {results.actuals && results.predictions && (
-              <div className="mt-6">
-                <h2 className="text-lg font-semibold mb-2">📉 Predictions vs Actual</h2>
-                <ResponsiveContainer width="100%" height={300}>
-                  <LineChart data={results.predictions.map((pred: number, idx: number) => ({
-                    index: idx + 1,
-                    Prediction: pred,
-                    Actual: results.actuals[idx]
-                  }))}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="index" />
-                    <YAxis />
-                    <Tooltip />
-                    <Legend />
-                    <Line type="monotone" dataKey="Actual" stroke="#8884d8" strokeWidth={2} />
-                    <Line type="monotone" dataKey="Prediction" stroke="#82ca9d" strokeWidth={2} />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
+      <div ref={resultRef} className="space-y-10">
+        {trendData && trendData.length > 0 && (
+          <Card className={cardClasses}>
+            <CardContent className="p-4">
+              <h2 className={headingClasses}>📊 Trend Analysis</h2>
+              <ResponsiveContainer width="100%" height={300}>
+                <AreaChart data={trendData}>
+                  <defs>
+                    <linearGradient id="trendGradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#f97316" stopOpacity={0.8} />
+                      <stop offset="95%" stopColor="#f97316" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <XAxis dataKey="month" hide />
+                  <YAxis hide />
+                  <Tooltip />
+                  <Area type="monotone" dataKey={valueColumn} stroke="#f97316" fillOpacity={1} fill="url(#trendGradient)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+        )}
 
-      {clusters && (
-        <Card className="mt-6">
-          <CardContent className="space-y-2 p-4">
-            <div className="font-medium">🧬 Clustered Sample:</div>
-            <table className="text-sm w-full">
-              <thead>
-                <tr>
-                  {Object.keys(clusters[0]).map((key) => (
-                    <th key={key} className="text-left pr-4">{key}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {clusters.map((row, i) => (
-                  <tr key={i}>
-                    {Object.values(row).map((val, j) => (
-                      <td key={j} className="pr-4">{String(val)}</td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </CardContent>
-        </Card>
-      )}
+        {results && results.predictions && results.actuals && (
+          <Card className={cardClasses}>
+            <CardContent className="p-4">
+              <h2 className={headingClasses}>📈 Prediction vs Actual</h2>
+              <ResponsiveContainer width="100%" height={300}>
+                <LineChart data={results.predictions.map((p: number, i: number) => ({ index: i + 1, Prediction: p, Actual: results.actuals[i] }))}>
+                  <XAxis dataKey="index" hide />
+                  <YAxis hide />
+                  <Tooltip />
+                  <Legend />
+                  <Line type="monotone" dataKey="Prediction" stroke="#34d399" strokeWidth={2} />
+                  <Line type="monotone" dataKey="Actual" stroke="#60a5fa" strokeWidth={2} />
+                </LineChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+        )}
 
-      {anomalies && anomalies.length > 0 && (
-        <Card className="mt-6">
-          <CardContent className="space-y-2 p-4">
-            <div className="font-medium text-red-600">🚨 Detected Anomalies:</div>
-            <table className="text-sm w-full">
-              <thead>
-                <tr>
-                  {Object.keys(anomalies[0]).map((key) => (
-                    <th key={key} className="text-left pr-4">{key}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {anomalies.map((row, i) => (
-                  <tr key={i}>
-                    {Object.values(row).map((val, j) => (
-                      <td key={j} className="pr-4">{String(val)}</td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </CardContent>
-        </Card>
-      )}
+        {anomalies && anomalies.length > 0 && (
+          <Card className={cardClasses}>
+            <CardContent className="p-4">
+              <h2 className={headingClasses}>🚨 Anomalies</h2>
+              <pre className="text-sm whitespace-pre-wrap overflow-auto max-h-60">
+                {JSON.stringify(anomalies, null, 2)}
+              </pre>
+            </CardContent>
+          </Card>
+        )}
 
-      {trendData && trendData.length > 0 && (
-        <Card className="mt-6">
-          <CardContent className="space-y-4 p-4">
-            <div className="text-lg font-medium">📊 Monthly Trend: {getTrendDirection()}</div>
-            <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={trendData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="month" />
-                <YAxis />
-                <Tooltip />
-                <Legend />
-                <Line type="monotone" dataKey={valueColumn} stroke="#f97316" strokeWidth={2} />
-              </LineChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
-      )}
-
-      {(results || anomalies || clusters) && (
-        <div className="mt-6">
-          <Button onClick={handleExport} variant="default">
-            🧾 Export PDF Report
-          </Button>
-        </div>
-      )}
+        {clusters && (
+          <Card className={cardClasses}>
+            <CardContent className="p-4">
+              <h2 className={headingClasses}>🧬 Clustering</h2>
+              <pre className="text-sm whitespace-pre-wrap overflow-auto max-h-60">
+                {JSON.stringify(clusters, null, 2)}
+              </pre>
+            </CardContent>
+          </Card>
+        )}
+      </div>
     </div>
   );
 }
