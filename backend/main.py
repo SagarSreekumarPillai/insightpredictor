@@ -1,29 +1,24 @@
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 import pandas as pd
-from io import StringIO
 import numpy as np
 from sklearn.linear_model import LinearRegression
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
 import math
-from fastapi.responses import FileResponse
-from reportlab.lib.pagesizes import A4
+from io import StringIO
 from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import A4
 import tempfile
 import os
 import json
 
 app = FastAPI()
 
-# CORS for frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"],
 )
 
 def clean_json_safe(obj):
@@ -37,21 +32,27 @@ def clean_json_safe(obj):
         return {k: clean_json_safe(v) for k, v in obj.items()}
     return obj
 
+def parse_csv(contents: bytes) -> pd.DataFrame:
+    try:
+        decoded = contents.decode("utf-8")
+    except UnicodeDecodeError:
+        decoded = contents.decode("latin1")
+
+    df = pd.read_csv(StringIO(decoded), engine="python", on_bad_lines="skip", sep=None)
+    df.replace([np.inf, -np.inf], np.nan, inplace=True)
+    df.dropna(how="all", inplace=True)
+    return df
+
 @app.get("/")
-def read_root():
+def root():
     return {"message": "InsightPredictor API is live"}
 
 @app.post("/upload")
 async def upload_csv(file: UploadFile = File(...)):
     contents = await file.read()
     try:
-        decoded = contents.decode("utf-8")
-    except UnicodeDecodeError:
-        decoded = contents.decode("latin1")
-
-    try:
-        df = pd.read_csv(StringIO(decoded), on_bad_lines="skip")
-        safe_df = df.head(5).replace([np.inf, -np.inf], np.nan).where(pd.notnull(df.head(5)), None)
+        df = parse_csv(contents)
+        safe_df = df.head(5).where(pd.notnull(df.head(5)), None)
         return {
             "columns": df.columns.tolist(),
             "rows": safe_df.to_dict(orient="records"),
@@ -61,61 +62,43 @@ async def upload_csv(file: UploadFile = File(...)):
         return {"error": f"Could not parse CSV: {str(e)}"}
 
 @app.post("/predict")
-async def predict_csv(
-    file: UploadFile = File(...),
-    target_column: str = Form(...)
-):
+async def predict(file: UploadFile = File(...), target_column: str = Form(...)):
     contents = await file.read()
     try:
-        decoded = contents.decode("utf-8")
-        df = pd.read_csv(StringIO(decoded), on_bad_lines="skip")
-    except Exception as e:
-        return {"error": f"Could not read CSV: {str(e)}"}
+        df = parse_csv(contents)
+        if target_column not in df.columns:
+            return {"error": f"Target column '{target_column}' not found."}
 
-    if target_column not in df.columns:
-        return {"error": f"Target column '{target_column}' not found in CSV."}
-
-    try:
         df = df.dropna(subset=[target_column])
-        features_df = df.drop(columns=[target_column])
         y = df[target_column]
-        X = features_df.select_dtypes(include=[np.number])
-        if X.empty:
-            return {"error": "No numeric features found for training."}
+        X = df.drop(columns=[target_column]).select_dtypes(include=[np.number]).dropna()
+
+        if X.shape[0] < 2 or X.shape[1] < 1:
+            return {"error": "Not enough numeric data for prediction."}
 
         model = LinearRegression()
         model.fit(X, y)
         predictions = model.predict(X)
 
-        result = {
-            "coefficients": dict(zip(X.columns, model.coef_.tolist())),
-            "intercept": float(model.intercept_),
+        return JSONResponse(content=clean_json_safe({
+            "coefficients": dict(zip(X.columns, model.coef_)),
+            "intercept": model.intercept_,
             "predictions": predictions[:5].tolist(),
             "actuals": y[:5].tolist(),
-            "score": float(model.score(X, y)),
+            "score": model.score(X, y),
             "features_used": X.columns.tolist(),
             "rows_used": len(X)
-        }
-
-        return JSONResponse(content=clean_json_safe(result))
-
+        }))
     except Exception as e:
         return {"error": f"Prediction failed: {str(e)}"}
 
 @app.post("/cluster")
-async def cluster_csv(
-    file: UploadFile = File(...),
-    n_clusters: int = Form(3)
-):
+async def cluster(file: UploadFile = File(...), n_clusters: int = Form(3)):
     contents = await file.read()
     try:
-        decoded = contents.decode("utf-8")
-        df = pd.read_csv(StringIO(decoded), on_bad_lines="skip")
-    except Exception as e:
-        return {"error": f"Could not read CSV: {str(e)}"}
-
-    try:
+        df = parse_csv(contents)
         numeric_df = df.select_dtypes(include=[np.number]).dropna()
+
         if numeric_df.shape[0] < n_clusters:
             return {"error": f"Not enough rows to form {n_clusters} clusters."}
 
@@ -123,89 +106,64 @@ async def cluster_csv(
         kmeans.fit(numeric_df)
         df["cluster"] = kmeans.labels_
 
-        result = {
+        return JSONResponse(content=clean_json_safe({
             "clustered_sample": df.head(10).to_dict(orient="records"),
             "centroids": kmeans.cluster_centers_.tolist(),
             "features_used": numeric_df.columns.tolist(),
             "num_clusters": n_clusters
-        }
-
-        return JSONResponse(content=clean_json_safe(result))
-
+        }))
     except Exception as e:
         return {"error": f"Clustering failed: {str(e)}"}
 
 @app.post("/anomalies")
-async def detect_anomalies(file: UploadFile = File(...), z_thresh: float = Form(3.0)):
+async def anomalies(file: UploadFile = File(...), z_thresh: float = Form(3.0)):
     contents = await file.read()
     try:
-        decoded = contents.decode("utf-8")
-        df = pd.read_csv(StringIO(decoded), on_bad_lines="skip")
-    except Exception as e:
-        return {"error": f"Could not read CSV: {str(e)}"}
+        df = parse_csv(contents)
+        numeric_df = df.select_dtypes(include=[np.number]).dropna()
 
-    try:
-        numeric_df = df.select_dtypes(include=[np.number])
         if numeric_df.empty:
-            return {"error": "No numeric columns found."}
+            return {"error": "No numeric columns for anomaly detection."}
 
         scaler = StandardScaler()
         scaled = scaler.fit_transform(numeric_df)
         z_scores = np.abs(scaled)
         anomaly_mask = (z_scores > z_thresh).any(axis=1)
 
-        anomalies = df[anomaly_mask].copy()
+        anomalies_df = df[anomaly_mask].copy()
         reasons = []
-
-        for i, row in anomalies.iterrows():
+        for i, row in anomalies_df.iterrows():
             cols = numeric_df.columns[(z_scores[i] > z_thresh)]
             reasons.append(", ".join(cols.tolist()))
 
-        result = {
-            "anomalies": anomalies.head(10).to_dict(orient="records"),
+        return JSONResponse(content=clean_json_safe({
+            "anomalies": anomalies_df.head(10).to_dict(orient="records"),
             "reasons": reasons[:10],
             "z_threshold": z_thresh,
             "num_anomalies": int(anomaly_mask.sum())
-        }
-
-        return JSONResponse(content=clean_json_safe(result))
-
+        }))
     except Exception as e:
         return {"error": f"Anomaly detection failed: {str(e)}"}
 
 @app.post("/trend")
-async def trend_analysis(
-    file: UploadFile = File(...),
-    date_column: str = Form(...),
-    value_column: str = Form(...)
-):
+async def trend(file: UploadFile = File(...), date_column: str = Form(...), value_column: str = Form(...)):
     contents = await file.read()
     try:
-        decoded = contents.decode("utf-8")
-        df = pd.read_csv(StringIO(decoded), on_bad_lines="skip")
-    except Exception as e:
-        return {"error": f"Could not read CSV: {str(e)}"}
+        df = parse_csv(contents)
+        if date_column not in df.columns or value_column not in df.columns:
+            return {"error": "Date or value column not found."}
 
-    if date_column not in df.columns or value_column not in df.columns:
-        return {"error": "Date or value column not found."}
-
-    try:
         df[date_column] = pd.to_datetime(df[date_column], errors='coerce')
         df = df.dropna(subset=[date_column, value_column])
         df["month"] = df[date_column].dt.to_period("M").astype(str)
 
         trend = df.groupby("month")[value_column].mean().reset_index()
-        trend_data = trend.to_dict(orient="records")
-
-        result = {
-            "trend": trend_data,
+        return JSONResponse(content=clean_json_safe({
+            "trend": trend.to_dict(orient="records"),
             "date_column": date_column,
             "value_column": value_column,
-            "points": len(trend_data)
-        }
-
-        return JSONResponse(content=clean_json_safe(result))
-
+            "points": len(trend)
+        }))
     except Exception as e:
         return {"error": f"Trend analysis failed: {str(e)}"}
 
@@ -215,35 +173,28 @@ async def export_pdf(
     target_column: str = Form(""),
     trend_column: str = Form(""),
     trend_direction: str = Form(""),
-    summary: str = Form("")  # JSON string with prediction, anomalies, etc.
+    summary: str = Form("")
 ):
     try:
-        # Parse the JSON summary
         summary_data = json.loads(summary)
-
-        # Create a temp file for the PDF
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
         c = canvas.Canvas(tmp.name, pagesize=A4)
         width, height = A4
         line_height = 20
         y = height - 40
 
-        # Title
         c.setFont("Helvetica-Bold", 16)
         c.drawString(50, y, "📊 InsightPredictor Analysis Report")
         y -= 40
 
         c.setFont("Helvetica", 12)
-
         if target_column:
             c.drawString(50, y, f"🎯 Prediction Target: {target_column}")
             y -= line_height
-
         if trend_column:
             c.drawString(50, y, f"📈 Trend Column: {trend_column} → {trend_direction}")
             y -= line_height
 
-        # Add Prediction Results
         pred = summary_data.get("prediction", {})
         if pred:
             c.drawString(50, y, f"✅ R² Score: {round(pred.get('score', 0), 3)}")
@@ -254,7 +205,6 @@ async def export_pdf(
                 c.drawString(70, y, f"{k}: {round(v, 3)}")
                 y -= line_height
 
-        # Anomalies
         anomalies = summary_data.get("anomalies", [])
         if anomalies:
             y -= line_height
@@ -267,7 +217,6 @@ async def export_pdf(
                     c.showPage()
                     y = height - 40
 
-        # Clustering
         clusters = summary_data.get("clusters", [])
         if clusters:
             y -= line_height
@@ -281,7 +230,6 @@ async def export_pdf(
                     y = height - 40
 
         c.save()
-
         return FileResponse(tmp.name, filename="insight_report.pdf", media_type="application/pdf")
 
     except Exception as e:

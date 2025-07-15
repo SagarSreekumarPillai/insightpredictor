@@ -1,16 +1,16 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import axios from "axios";
 import toast, { Toaster } from "react-hot-toast";
 import { ArrowDownCircle, Sun } from "lucide-react";
 
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Button } from "@/components/ui/button";
 import { FileUploader } from "@/components/insight/FileUploader";
 import { ColumnSelector } from "@/components/insight/ColumnSelector";
-import { ResultCards } from "@/components/insight/ResultCards";
+import { ClusteringResult } from "@/components/insight/ClusteringResult";
+import { AnomalyResult } from "@/components/insight/AnomalyResult";
+import { PredictionResult } from "@/components/insight/PredictionResult";
+import { TrendResult } from "@/components/insight/TrendResult";
 
 export default function CsvUploader() {
   const [file, setFile] = useState<File | null>(null);
@@ -29,15 +29,14 @@ export default function CsvUploader() {
   const resultRef = useRef<HTMLDivElement>(null);
   const scrollToResults = () => {
     if (resultRef.current) {
-      resultRef.current.scrollIntoView({ behavior: "smooth" });
+      resultRef.current.scrollIntoView({ behavior: "smooth", block: "start", inline: "nearest" });
     }
   };
 
   const themeClasses = "bg-white text-gray-900";
-  const cardClasses = "bg-white border-gray-200";
-  const selectClasses = "bg-white text-black";
-  const headingClasses = "text-lg font-semibold text-black";
-  const buttonClasses = "bg-orange-500 text-white hover:bg-orange-400";
+  const cardClasses = "bg-white border border-gray-200 rounded-2xl shadow-sm";
+  const headingClasses = "text-lg font-semibold text-gray-800";
+  const buttonClasses = "bg-orange-500 text-white hover:bg-orange-400 transition px-4 py-2 rounded-lg";
 
   const handleUpload = async () => {
     if (!file) return toast.error("Please upload a file first");
@@ -56,57 +55,77 @@ export default function CsvUploader() {
   };
 
   return (
-    <div className={`min-h-screen px-6 py-10 space-y-10 transition-colors duration-300 ${themeClasses}`}>
+    <div className={`min-h-screen px-4 py-6 md:px-12 md:py-10 transition-colors duration-300 ${themeClasses}`}>
       <Toaster />
+
       <div className="fixed top-6 right-6 z-50 flex gap-3">
         <button className={`p-2 rounded-full shadow-md ${buttonClasses}`}>
           <Sun className="w-5 h-5" />
         </button>
-        <button className={`p-3 rounded-full shadow-lg ${buttonClasses}`} onClick={scrollToResults}>
+        <button
+          className={`p-3 rounded-full shadow-lg ${buttonClasses}`}
+          onClick={scrollToResults}
+        >
           <ArrowDownCircle className="w-6 h-6" />
         </button>
       </div>
 
-      <FileUploader
-        file={file}
-        setFile={setFile}
-        onUpload={handleUpload}
-        buttonClasses={buttonClasses}
-      />
+      <div className="grid grid-cols-1 xl:grid-cols-5 gap-6 mt-6">
+        <div className="xl:col-span-1 space-y-6 sticky top-24 self-start">
+          <FileUploader
+            file={file}
+            setFile={setFile}
+            onUpload={handleUpload}
+            buttonClasses={buttonClasses}
+          />
 
-      {columns.length > 0 && (
-        <ColumnSelector
-          columns={columns}
-          shape={shape}
-          target={target}
-          setTarget={setTarget}
-          dateColumn={dateColumn}
-          setDateColumn={setDateColumn}
-          valueColumn={valueColumn}
-          setValueColumn={setValueColumn}
-          numClusters={numClusters}
-          setNumClusters={setNumClusters}
-          zThreshold={zThreshold}
-          setZThreshold={setZThreshold}
-          file={file}
-          setResults={setResults}
-          setClusters={setClusters}
-          setAnomalies={setAnomalies}
-          setTrendData={setTrendData}
-          buttonClasses={buttonClasses}
-        />
-      )}
+          {columns.length > 0 && (
+            <ColumnSelector
+              columns={columns}
+              shape={shape}
+              target={target}
+              setTarget={setTarget}
+              dateColumn={dateColumn}
+              setDateColumn={setDateColumn}
+              valueColumn={valueColumn}
+              setValueColumn={setValueColumn}
+              numClusters={numClusters}
+              setNumClusters={setNumClusters}
+              zThreshold={zThreshold}
+              setZThreshold={setZThreshold}
+              file={file}
+              setResults={setResults}
+              setClusters={setClusters}
+              setAnomalies={setAnomalies}
+              setTrendData={setTrendData}
+              buttonClasses={buttonClasses}
+            />
+          )}
+        </div>
 
-      <div ref={resultRef} className="space-y-10">
-        <ResultCards
-          trendData={trendData}
-          results={results}
-          anomalies={anomalies}
-          clusters={clusters}
-          valueColumn={valueColumn}
-          cardClasses={cardClasses}
-          headingClasses={headingClasses}
-        />
+        <div ref={resultRef} className="xl:col-span-4 space-y-10">
+        {results?.predictions && results?.actuals && (
+          <PredictionResult
+            results={results}
+            cardClasses={cardClasses}
+            headingClasses={headingClasses}
+          />
+        )}
+
+        {anomalies && anomalies.length > 0 && (
+          <AnomalyResult
+            anomalies={anomalies}
+            cardClasses={cardClasses}
+            headingClasses={headingClasses}
+          />
+        )}
+        {trendData && trendData.length > 0 && (
+          <TrendResult trendData={trendData} valueColumn={valueColumn} cardClasses={cardClasses} headingClasses={headingClasses} />
+        )}
+        {clusters && (
+          <ClusteringResult clusters={clusters} cardClasses={cardClasses} headingClasses={headingClasses} />
+        )}
+        </div>
       </div>
     </div>
   );
